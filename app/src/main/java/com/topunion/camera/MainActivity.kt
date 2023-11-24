@@ -3,11 +3,16 @@ package com.topunion.camera
 import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.content.ComponentName
+import android.content.Context
+import android.content.Intent
+import android.content.ServiceConnection
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.Point
 import android.os.Bundle
+import android.os.IBinder
 import android.util.Log
 import android.view.View.GONE
 import android.view.View.VISIBLE
@@ -22,14 +27,32 @@ import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
-import androidx.lifecycle.LifecycleOwner
-
 
 class MainActivity : AppCompatActivity() {
-    private var permissions = arrayOf(Manifest.permission.CAMERA)
+    private var permissions = arrayOf(Manifest.permission.CAMERA, Manifest.permission.WAKE_LOCK)
     private lateinit var layout: FrameLayout
+
     private lateinit var previewView: PreviewView
+    private lateinit var preview: Preview
+    private lateinit var cameraSelector: CameraSelector
+    private lateinit var cameraProvider: ProcessCameraProvider
+
     private lateinit var textView: TextView
+
+    // Bindings to VideoRecordingService.
+    private lateinit var videoRecordingService: VideoRecordingService
+    private var videoRecordingServiceBound: Boolean = false
+    private val videoRecordingServiceConnection = object : ServiceConnection {
+        override fun onServiceConnected(className: ComponentName, service: IBinder) {
+            val binder = service as VideoRecordingService.LocalBinder
+            videoRecordingService = binder.getService()
+            videoRecordingServiceBound = true
+            onVideoRecordingServiceBound()
+        }
+        override fun onServiceDisconnected(arg0: ComponentName) {
+            videoRecordingServiceBound = false
+        }
+    }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -54,8 +77,26 @@ class MainActivity : AppCompatActivity() {
         }
         requestPermissionLauncher.launch(this.permissions)
     }
+
+    override fun onStart() {
+        super.onStart()
+
+        Intent(this, VideoRecordingService::class.java).also { intent ->
+            bindService(intent, this.videoRecordingServiceConnection, Context.BIND_AUTO_CREATE)
+        }
+    }
+    override fun onStop() {
+        super.onStop()
+
+        this.cameraProvider.unbind(this.preview)
+
+        unbindService(this.videoRecordingServiceConnection)
+        this.videoRecordingServiceBound = false
+    }
     @SuppressLint("SourceLockedOrientationActivity", "SetTextI18n")
     fun onHasPermission() {
+        this.startForegroundService(Intent(this, VideoRecordingService::class.java))
+
         this.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
         // Remove stupid bar at the top.
         this.supportActionBar?.hide()
@@ -68,12 +109,12 @@ class MainActivity : AppCompatActivity() {
         params.topMargin = 0
         this.previewView.layoutParams = params
         layout.addView(this.previewView)
-        val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
-        val activity = this
-        cameraProviderFuture.addListener({
-            val cameraProvider = cameraProviderFuture.get()
-            activity.bindPreview(cameraProvider)
-        }, ContextCompat.getMainExecutor(this))
+
+        val csBuilder = CameraSelector.Builder()
+        csBuilder.requireLensFacing(CameraSelector.LENS_FACING_BACK)
+        this.cameraSelector = csBuilder.build()
+        this.preview = Preview.Builder().build()
+        this.preview.setSurfaceProvider(this.previewView.surfaceProvider)
 
         this.textView = TextView(this)
         params = FrameLayout.LayoutParams(clientSize.x, clientSize.y/2)
@@ -92,6 +133,7 @@ class MainActivity : AppCompatActivity() {
         btn.layoutParams = params
         btn.text = "show/hide"
 
+        val activity = this
         btn.setOnClickListener { _ -> activity.showHideClick() }
         this.layout.addView(btn)
 
@@ -100,19 +142,13 @@ class MainActivity : AppCompatActivity() {
         Log.v("TAG", "onCreate")
     }
 
-    private fun bindPreview(cameraProvider: ProcessCameraProvider) {
-        Log.v("TAG", "bindPreview")
-        val csBuilder = CameraSelector.Builder()
-        csBuilder.requireLensFacing(CameraSelector.LENS_FACING_BACK)
-        val cameraSelector = csBuilder.build()
-
-        val preview = Preview.Builder().build()
-        preview.setSurfaceProvider(this.previewView.surfaceProvider)
-
-        val camera = cameraProvider.bindToLifecycle(this as LifecycleOwner, cameraSelector, preview)
-        Log.v("TAG", camera.toString())
+    fun onVideoRecordingServiceBound() {
+        val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
+        cameraProviderFuture.addListener({
+            this.cameraProvider = cameraProviderFuture.get()
+            this.cameraProvider.bindToLifecycle(this.videoRecordingService, this.cameraSelector, this.preview)
+        }, ContextCompat.getMainExecutor(this))
     }
-
     private fun showHideClick() {
         Log.v("TAG", "click")
         if (this.textView.visibility == VISIBLE) {
