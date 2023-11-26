@@ -2,7 +2,6 @@ package com.topunion.camera
 
 import android.Manifest
 import android.annotation.SuppressLint
-import android.app.Activity
 import android.content.ComponentName
 import android.content.ContentValues
 import android.content.Context
@@ -11,8 +10,6 @@ import android.content.ServiceConnection
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.database.sqlite.SQLiteDatabase
-import android.graphics.Color
-import android.graphics.Point
 import android.os.Bundle
 import android.os.IBinder
 import android.util.Log
@@ -34,6 +31,8 @@ import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
+import java.io.File
+
 
 class MainActivity : AppCompatActivity() {
     private var permissions = arrayOf(
@@ -41,22 +40,20 @@ class MainActivity : AppCompatActivity() {
         Manifest.permission.WAKE_LOCK)
 
     private lateinit var preview: Preview
-    private var cameraProvider: ProcessCameraProvider? = null
+    private lateinit var previewView: PreviewView
 
-    private lateinit var textView: TextView
+    private var cfg = Config()
 
     // Bindings to VideoRecordingService.
     private lateinit var videoRecordingService: VideoRecordingService
-    private var videoRecordingServiceBound: Boolean = false
     private val videoRecordingServiceConnection = object : ServiceConnection {
         override fun onServiceConnected(className: ComponentName, service: IBinder) {
             val binder = service as VideoRecordingService.LocalBinder
             videoRecordingService = binder.getService()
-            videoRecordingServiceBound = true
             onVideoRecordingServiceBound()
         }
         override fun onServiceDisconnected(arg0: ComponentName) {
-            videoRecordingServiceBound = false
+            // videoRecordingService = null
         }
     }
     @SuppressLint("SourceLockedOrientationActivity", "SetTextI18n")
@@ -64,14 +61,15 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
 
         this.preview = Preview.Builder().build()
+        this.previewView = PreviewView(this)
 
         val db = DBHelper(this).readableDatabase
-        val cfg = DBHelper.readConfig(db)
-        if (cfg.cameraID == "") {
-            cfg.cameraID = "myCamera"
+        this.cfg = DBHelper.readConfig(db)
+        if (this.cfg.cameraID == "") {
+            this.cfg.cameraID = "myCamera"
         }
-        if (cfg.uploadPath == "") {
-            cfg.uploadPath = "http://10.0.2.2:8080/UploadVideo"
+        if (this.cfg.uploadPath == "") {
+            this.cfg.uploadPath = "http://10.0.2.2:8080/UploadVideo"
         }
 
         this.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
@@ -86,7 +84,7 @@ class MainActivity : AppCompatActivity() {
 
         val cameraIDLabel = TextView(this)
         layout.addView(cameraIDLabel)
-        val clientSize = getClientSize(this)
+        val clientSize = Util.getClientSize(this)
         cameraIDLabel.setTextSize(TypedValue.COMPLEX_UNIT_PX, (clientSize.y/ 10).toFloat())
         cameraIDLabel.text = "Camera name"
 
@@ -124,30 +122,28 @@ class MainActivity : AppCompatActivity() {
             }
 
             if (isGranted) {
-                this.onHasPermission(cfg)
+                this.onHasPermission(this.cfg)
             } else {
                 Toast.makeText(activity, "Permission request denied", Toast.LENGTH_LONG).show()
             }
         }
         okBtn.setOnClickListener { _ ->
-            activity.askPermission(requestPermissionLauncher, cfg)
+            this.cfg.cameraID = cameraIDInput.text.toString()
+            this.cfg.uploadPath = serverInput.text.toString()
+            activity.askPermission(requestPermissionLauncher, this.cfg)
         }
     }
 
     override fun onStart() {
         super.onStart()
-
-        if (!this.hasPermissions()) {
-            return
-        }
-        val intent = Intent(this, VideoRecordingService::class.java)
-        this.bindService(intent, this.videoRecordingServiceConnection, Context.BIND_AUTO_CREATE)
+        this.preview.setSurfaceProvider(this.previewView.surfaceProvider)
     }
     override fun onStop() {
         super.onStop()
 
-        this.cameraProvider?.unbind(this.preview)
-        this.unbindService(this.videoRecordingServiceConnection)
+        // It is very IMPORTANT that we set the surface to null,
+        // or else stupid Android stops our video recording!
+        this.preview.setSurfaceProvider(null)
     }
 
     private fun askPermission(requestPermissionLauncher: ActivityResultLauncher<Array<String>>, cfg: Config) {
@@ -157,7 +153,7 @@ class MainActivity : AppCompatActivity() {
         }
         requestPermissionLauncher.launch(this.permissions)
     }
-    @SuppressLint("SetTextI18n")
+    @SuppressLint("SetTextI18n", "ClickableViewAccessibility")
     fun onHasPermission(cfg: Config) {
         // Write config.
         val db = DBHelper(this).writableDatabase
@@ -172,30 +168,28 @@ class MainActivity : AppCompatActivity() {
         }
         db.insertWithOnConflict(DBHelper.TableConfig, null, values, SQLiteDatabase.CONFLICT_REPLACE)
 
-        // Launch background jobs in foreground service.
-        val intent = Intent(this, VideoRecordingService::class.java)
-        this.bindService(intent, this.videoRecordingServiceConnection, Context.BIND_AUTO_CREATE)
-
         val layout = FrameLayout(this)
         this.setContentView(layout)
 
-        val clientSize = getClientSize(this)
-        val previewView = PreviewView(this)
+        val clientSize = Util.getClientSize(this)
         var params = FrameLayout.LayoutParams(clientSize.x, clientSize.y)
         params.leftMargin = 0
         params.topMargin = 0
-        previewView.layoutParams = params
-        layout.addView(previewView)
-        this.preview.setSurfaceProvider(previewView.surfaceProvider)
+        this.previewView.layoutParams = params
+        layout.addView(this.previewView)
 
-        this.textView = TextView(this)
+        val statusPage = StatusPage.new(this)
         params = FrameLayout.LayoutParams(clientSize.x, clientSize.y/2)
         params.leftMargin = 0
         params.topMargin = 0
-        this.textView.layoutParams = params
-        this.textView.text = "hello world"
-        this.textView.setBackgroundColor(Color.rgb(255, 0, 0))
-        layout.addView(this.textView)
+        statusPage.contentView.layoutParams = params
+        statusPage.contentView.visibility = GONE
+        val activity = this
+        statusPage.zll.setOnTouchListener { _, _ ->
+            statusPage.zll.init(this@MainActivity)
+            false
+        }
+        layout.addView(statusPage.contentView)
 
         val btn = Button(this)
         val btnWidth = clientSize.x/4
@@ -204,11 +198,12 @@ class MainActivity : AppCompatActivity() {
         params.topMargin = 0
         btn.layoutParams = params
         btn.text = "show/hide"
-        val activity = this
-        btn.setOnClickListener { _ -> activity.showHideClick() }
+        btn.setOnClickListener { _ -> activity.showHideClick(statusPage) }
         layout.addView(btn)
 
         this.startForegroundService(Intent(this, VideoRecordingService::class.java))
+        val intent = Intent(this, VideoRecordingService::class.java)
+        this.bindService(intent, this.videoRecordingServiceConnection, Context.BIND_AUTO_CREATE)
     }
 
     fun onVideoRecordingServiceBound() {
@@ -219,18 +214,22 @@ class MainActivity : AppCompatActivity() {
         val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
         val activity = this
         cameraProviderFuture.addListener({
-            activity.cameraProvider = cameraProviderFuture.get()
-            activity.cameraProvider?.bindToLifecycle(
-                activity.videoRecordingService, cameraSelector, activity.preview)
+            cameraProviderFuture.get().bindToLifecycle(activity.videoRecordingService, cameraSelector, activity.preview)
         }, ContextCompat.getMainExecutor(this))
     }
 
-    private fun showHideClick() {
-        Log.v("TAG", "click")
-        if (this.textView.visibility == VISIBLE) {
-            this.textView.visibility = GONE
+    private fun showHideClick(statusPage: StatusPage) {
+        val videoFiles = File(this.videoRecordingService.videoDir).listFiles()
+        val numVideos = videoFiles?.size ?: 0
+
+        var uploadErrs = emptyArray<UploadError>()
+        uploadErrs = this.videoRecordingService.uploadErrs.all(uploadErrs)
+
+        statusPage.update(this.cfg, numVideos, uploadErrs)
+        if (statusPage.contentView.visibility == VISIBLE) {
+            statusPage.contentView.visibility = GONE
         } else {
-            this.textView.visibility = VISIBLE
+            statusPage.contentView.visibility = VISIBLE
         }
     }
 
@@ -242,10 +241,4 @@ class MainActivity : AppCompatActivity() {
         }
         return true
     }
-}
-fun getClientSize(activity: Activity): Point {
-    val displaySize = Point()
-    @Suppress("DEPRECATION")
-    activity.windowManager.defaultDisplay.getRealSize(displaySize)
-    return displaySize
 }

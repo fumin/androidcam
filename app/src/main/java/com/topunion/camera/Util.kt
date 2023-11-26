@@ -1,5 +1,7 @@
 package com.topunion.camera
 
+import android.app.Activity
+import android.graphics.Point
 import java.io.File
 import java.time.Instant
 import java.time.ZoneId
@@ -62,6 +64,13 @@ class Util {
                 }
             }
             fileOrDirectory.delete()
+        }
+
+        fun getClientSize(activity: Activity): Point {
+            val displaySize = Point()
+            @Suppress("DEPRECATION")
+            activity.windowManager.defaultDisplay.getRealSize(displaySize)
+            return displaySize
         }
     }
 }

@@ -3,6 +3,8 @@ package com.topunion.camera
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
+import android.app.TaskStackBuilder
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
@@ -45,17 +47,19 @@ import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.Executors
 import java.util.concurrent.Future
 
+class UploadError(var name: String, var err: String)
 
 class VideoRecordingService : LifecycleService() {
     private val mutex = Object()
     private var serverStartTime = Util.timeDate(2006, Util.January, 2, 15, 4, 5, 0, Util.UTC)
 
     private var cfg = Config()
-    private var videoDir: String = ""
-
-    private val videoQueue = ArrayBlockingQueue<String>(1)
+    var videoDir: String = ""
 
     private var db: SQLiteDatabase? = null
+    val uploadErrs = Deque<UploadError>(32)
+
+    private val videoQueue = ArrayBlockingQueue<String>(1)
 
     inner class LocalBinder : Binder() {
         fun getService(): VideoRecordingService = this@VideoRecordingService
@@ -72,8 +76,13 @@ class VideoRecordingService : LifecycleService() {
         // Make sure we are foreground.
         val serviceID = 100
         val channelId = this.createNotificationChannel("my_service", "My Background Service")
+        val parentStack = TaskStackBuilder.create(this)
+            .addNextIntentWithParentStack(Intent(this, MainActivity::class.java))
+        val pendingIntent1 = parentStack.getPendingIntent(0, PendingIntent.FLAG_IMMUTABLE)
         val notification = NotificationCompat.Builder(this, channelId)
             .setContentTitle("My Awesome App")
+            .setContentText("recording in background")
+            .setContentIntent(pendingIntent1)
             .build()
         var serviceType = 0
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -88,10 +97,9 @@ class VideoRecordingService : LifecycleService() {
         this.cfg = DBHelper.readConfig(DBHelper(this).readableDatabase)
         this.db = DBHelper(this).writableDatabase
         // Prepare video directory.
-        this.videoDir = File(this.filesDir, "video").toString()
+        this.videoDir = File(this.getExternalFilesDir(null), "video").toString()
         File(this.videoDir).mkdirs()
 
-        Thread{this.deleteOldUploadLogs(Duration.ofHours(24))}.start()
         Thread{this.uploadVideosAfter(Duration.ofMinutes(60))}.start()
 
         val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
@@ -102,6 +110,11 @@ class VideoRecordingService : LifecycleService() {
         }, ContextCompat.getMainExecutor(this))
 
         return START_STICKY
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        Log.v("TAG", "service onDestroy")
     }
 
     private fun onCameraProvider(cameraProvider: ProcessCameraProvider){
@@ -125,6 +138,7 @@ class VideoRecordingService : LifecycleService() {
     }
 
     private fun recordVideo(videoCapture: VideoCapture<Recorder>) {
+        Log.v("TAG", "start recording video")
         val wakeLock: PowerManager.WakeLock =
             (getSystemService(Context.POWER_SERVICE) as PowerManager).run {
                 newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "MyApp::MyWakelockTag").apply {
@@ -161,9 +175,22 @@ class VideoRecordingService : LifecycleService() {
             this.onVideoFinalize(ev)
         }
     }
-    private fun onVideoFinalize(ev: VideoRecordEvent) {
+    private fun onVideoFinalize(ev: VideoRecordEvent.Finalize) {
         val foOptions = ev.outputOptions as FileOutputOptions
-        this.videoQueue.offer(foOptions.file.toString())
+        val fpath = foOptions.file.toString()
+        if (ev.hasError()) {
+            val errType = ev.error.toString()
+            val buf = ByteArrayOutputStream()
+            ev.cause?.printStackTrace(PrintStream(buf))
+            val errCause = buf.toString()
+            val err = "%s %s".format(errType, errCause)
+
+            Log.v("TAG", "video error %s".format(err))
+            this.uploadErrs.append(UploadError(fpath, err))
+            return
+        }
+
+        this.videoQueue.offer(fpath)
     }
 
     private fun uploadVideosAfter(ago: Duration) {
@@ -235,9 +262,9 @@ class VideoRecordingService : LifecycleService() {
 
     private fun uploadVideo(fpath: String) {
         val (response, err) = uploadVideo(this.cfg.uploadPath, this.cfg.cameraID, fpath)
-        this.db?.let { DBHelper.logUpload(it, File(fpath).name, err) }
         if (err != "") {
             Log.v("TAG", err)
+            this.uploadErrs.append(UploadError(fpath, err))
             return
         }
         val resp = JSONObject(response)
@@ -247,17 +274,6 @@ class VideoRecordingService : LifecycleService() {
         this.setServerStartTimeSafe(st)
 
         File(fpath).delete()
-    }
-
-    private fun deleteOldUploadLogs(ago: Duration) {
-        val faraway = Util.timeDate(9999, Util.December, 31, 23, 59, 59, 0, Util.UTC)
-        while (Instant.now().isBefore(faraway)) {
-            val now = Instant.now()
-            val cutoff = Instant.ofEpochSecond(now.epochSecond - ago.toMillis()/1000)
-
-            this.db?.execSQL("delete from uploadLog where t < ?", arrayOf(cutoff))
-            Thread.sleep(ago.toMillis())
-        }
     }
 
     @Suppress("SameParameterValue")
