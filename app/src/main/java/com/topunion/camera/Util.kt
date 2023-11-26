@@ -1,16 +1,15 @@
 package com.topunion.camera
 
-import android.os.Build
-import androidx.annotation.RequiresApi
+import java.io.File
 import java.time.Instant
 import java.time.ZoneId
 import java.time.ZonedDateTime
 
+
 class Util {
     @Suppress("unused")
     companion object {
-        @RequiresApi(Build.VERSION_CODES.O)
-        fun timeFormat20060102150405(t: Instant): String {
+        fun timeFormatSafe(t: Instant): String {
             val zdt: ZonedDateTime = t.atZone(UTC)
             return "%04d%02d%02d_%02d%02d%02d".format(
                 zdt.year,
@@ -22,13 +21,23 @@ class Util {
             )
         }
 
-        @RequiresApi(Build.VERSION_CODES.O)
+        fun timeFormatRFC3339(t: Instant): String {
+            val zdt: ZonedDateTime = t.atZone(UTC)
+            return "%04d-%02d-%02dT%02d:%02d:%02dZ".format(
+                zdt.year,
+                zdt.month.value,
+                zdt.dayOfMonth,
+                zdt.hour,
+                zdt.minute,
+                zdt.second
+            )
+        }
+
         fun timeDate(year: Int, month: Int, day: Int, hour: Int, minute: Int, second: Int, nanoSec: Int, location: ZoneId) : Instant {
             val zdt = ZonedDateTime.of(year, month, day, hour, minute, second, nanoSec, location)
             return zdt.toInstant()
         }
 
-        @RequiresApi(Build.VERSION_CODES.O)
         val UTC: ZoneId = ZoneId.of("UTC")
         const val January = 1
         const val February = 2
@@ -42,5 +51,17 @@ class Util {
         const val October = 10
         const val November = 11
         const val December = 12
+
+        fun removeAll(fpath: String) {
+            removeAllF(File(fpath))
+        }
+        private fun removeAllF(fileOrDirectory: File) {
+            if (fileOrDirectory.isDirectory) {
+                for (child in fileOrDirectory.listFiles()!!) {
+                    removeAllF(child)
+                }
+            }
+            fileOrDirectory.delete()
+        }
     }
 }
