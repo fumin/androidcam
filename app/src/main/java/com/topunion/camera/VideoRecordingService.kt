@@ -36,6 +36,7 @@ import java.io.ByteArrayOutputStream
 import java.io.DataOutputStream
 import java.io.File
 import java.io.FileInputStream
+import java.io.InputStream
 import java.io.InputStreamReader
 import java.io.PrintStream
 import java.net.HttpURLConnection
@@ -60,6 +61,7 @@ class VideoRecordingService : LifecycleService() {
     private var db: SQLiteDatabase? = null
     val uploadErrs = Deque<UploadError>(32)
 
+    private lateinit var recordVideoThread: Thread
     private val stopRecordingQueue = ArrayBlockingQueue<String>(1)
     private val videoFinalizedQueue = ArrayBlockingQueue<String>(1)
 
@@ -106,6 +108,12 @@ class VideoRecordingService : LifecycleService() {
 
         Thread{this.uploadVideosAfter(Duration.ofMinutes(60))}.start()
 
+        val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
+        cameraProviderFuture.addListener({
+            val camProvider =  cameraProviderFuture.get()
+            this.onCameraProvider(camProvider)
+        }, ContextCompat.getMainExecutor(this))
+
         return START_STICKY
     }
 
@@ -114,7 +122,7 @@ class VideoRecordingService : LifecycleService() {
         Log.v("TAG", "service onDestroy")
     }
 
-    fun onCameraProvider(cameraProvider: ProcessCameraProvider){
+    private fun onCameraProvider(cameraProvider: ProcessCameraProvider){
         val csBuilder = CameraSelector.Builder()
         csBuilder.requireLensFacing(CameraSelector.LENS_FACING_BACK)
         val cameraSelector = csBuilder.build()
@@ -130,18 +138,20 @@ class VideoRecordingService : LifecycleService() {
             .build()
 
         cameraProvider.bindToLifecycle(this, cameraSelector, videoCapture)
-    }
 
-    fun startRecord() {
-        Thread {this.recordVideo(videoCapture)}.start()
+        this.recordVideoThread = Thread {this.recordVideo(videoCapture)}
+        this.recordVideoThread.start()
     }
 
     fun stopRecord() {
-        this.stopRecordingQueue.offer("stop", 200, TimeUnit.MILLISECONDS)
+        this.stopRecordingQueue.offer("stop", 10, TimeUnit.SECONDS)
+        this.recordVideoThread.join()
+        this.stopSelf()
     }
 
     private fun recordVideo(videoCapture: VideoCapture<Recorder>) {
         Log.v("TAG", "start recording video")
+
         val wakeLock: PowerManager.WakeLock =
             (getSystemService(Context.POWER_SERVICE) as PowerManager).run {
                 newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "MyApp::MyWakelockTag").apply {
@@ -271,7 +281,7 @@ class VideoRecordingService : LifecycleService() {
     private fun uploadVideo(fpath: String) {
         val (response, err) = uploadVideo(this.cfg.uploadPath, this.cfg.cameraID, fpath)
         if (err != "") {
-            Log.v("TAG", err)
+            Log.v("TAG", String.format("%s %s", fpath, err))
             this.uploadErrs.append(UploadError(fpath, err))
             return
         }
@@ -348,7 +358,13 @@ fun uploadVideo(urlStr: String, cameraID: String, fpath: String): Pair<String, S
         // End of multipart.
         output.writeBytes("--$boundary--$cRLF")
 
-        val input = BufferedReader(InputStreamReader(connection.inputStream, charset))
+        val status = connection.responseCode
+        val inputStream: InputStream = if (status != HttpURLConnection.HTTP_OK)  {
+            connection.errorStream
+        } else {
+            connection.inputStream
+        }
+        val input = BufferedReader(InputStreamReader(inputStream, charset))
         val responseBuilder = StringBuilder()
         val faraway = Util.timeDate(9999, Util.December, 31, 23, 59, 59, 0, Util.UTC)
         while (true) {
@@ -357,6 +373,10 @@ fun uploadVideo(urlStr: String, cameraID: String, fpath: String): Pair<String, S
                 break
             }
             responseBuilder.append(responseLine)
+        }
+
+        if (status != HttpURLConnection.HTTP_OK) {
+            return Pair("", responseBuilder.toString())
         }
         return Pair(responseBuilder.toString(), "")
     } catch (e: Throwable) {

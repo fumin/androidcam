@@ -1,11 +1,9 @@
 package com.topunion.camera
 
 import android.annotation.SuppressLint
-import android.app.Activity
-import android.util.Log
 import android.util.TypedValue
-import android.view.KeyEvent
 import android.view.View
+import android.view.inputmethod.EditorInfo
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -39,6 +37,9 @@ class StatusPage {
             sp.ll.addView(sp.cmdInput)
             val clientSize = Util.getClientSize(activity)
             sp.cmdInput.setTextSize(TypedValue.COMPLEX_UNIT_PX, (clientSize.y/ 32).toFloat())
+            sp.cmdInput.inputType = EditorInfo.TYPE_CLASS_TEXT
+            sp.cmdInput.setLines(1)
+            sp.cmdInput.imeOptions = EditorInfo.IME_ACTION_DONE
 
             val cameraIDLabel = TextView(activity)
             sp.ll.addView(cameraIDLabel)

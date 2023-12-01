@@ -13,10 +13,9 @@ import android.database.sqlite.SQLiteDatabase
 import android.os.Bundle
 import android.os.IBinder
 import android.util.Log
-import android.view.KeyEvent
-import android.view.View
 import android.view.View.GONE
 import android.view.View.VISIBLE
+import android.view.inputmethod.EditorInfo
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.Toast
@@ -64,7 +63,7 @@ class MainActivity : AppCompatActivity() {
         val db = DBHelper(this).readableDatabase
         val cfg = DBHelper.readConfig(db)
         if (cfg.cameraID == "") {
-            cfg.cameraID = "myCamera"
+            cfg.cameraID = "camera0"
         }
         if (cfg.uploadPath == "") {
             cfg.uploadPath = "http://10.0.2.2:8080/UploadVideo"
@@ -123,6 +122,8 @@ class MainActivity : AppCompatActivity() {
 
         // It is very IMPORTANT that we set the surface to null,
         // or else stupid Android stops our video recording!
+        // This is probably because when our activit is stopped, this.preview is also stopped,
+        // which affects our videoCapture in the background.
         this.preview.setSurfaceProvider(null)
     }
 
@@ -184,20 +185,24 @@ class MainActivity : AppCompatActivity() {
             val camProvider =  cameraProviderFuture.get()
             camProvider.bindToLifecycle(
                 activity.videoRecordingService, cameraSelector, activity.preview)
-            this.videoRecordingService.onCameraProvider(camProvider)
-            this.videoRecordingService.startRecord()
         }, ContextCompat.getMainExecutor(this))
 
-        this.statusPage.cmdInput.setOnKeyListener(View.OnKeyListener { _, keyCode, event ->
-            val cmd = this.statusPage.cmdInput.text.toString()
-            if (keyCode == KeyEvent.KEYCODE_ENTER && event.action == KeyEvent.ACTION_UP) {
+        this.statusPage.cmdInput.setOnEditorActionListener { _, actionId, _ ->
+            if (actionId == EditorInfo.IME_ACTION_DONE) {
+                val cmd = this.statusPage.cmdInput.text.toString()
+                Log.v("TAG", String.format("\"%s\"", cmd))
                 if (cmd == "stop") {
-                    this.videoRecordingService.stopRecord()
+                    this.stopRecord()
                 }
-                return@OnKeyListener true
+                return@setOnEditorActionListener true
             }
-            false
-        })
+            return@setOnEditorActionListener false
+        }
+    }
+
+    private fun stopRecord() {
+        this.videoRecordingService.stopRecord()
+        this.preview.setSurfaceProvider(null)
     }
 
     private fun showHideClick(statusPage: StatusPage) {
