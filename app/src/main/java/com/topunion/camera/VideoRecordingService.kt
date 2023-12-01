@@ -46,6 +46,7 @@ import java.util.Arrays
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.Executors
 import java.util.concurrent.Future
+import java.util.concurrent.TimeUnit
 
 class UploadError(var name: String, var err: String)
 
@@ -53,13 +54,16 @@ class VideoRecordingService : LifecycleService() {
     private val mutex = Object()
     private var serverStartTime = Util.timeDate(2006, Util.January, 2, 15, 4, 5, 0, Util.UTC)
 
-    private var cfg = Config()
+    var cfg = Config()
     var videoDir: String = ""
 
     private var db: SQLiteDatabase? = null
     val uploadErrs = Deque<UploadError>(32)
 
-    private val videoQueue = ArrayBlockingQueue<String>(1)
+    private val stopRecordingQueue = ArrayBlockingQueue<String>(1)
+    private val videoFinalizedQueue = ArrayBlockingQueue<String>(1)
+
+    private lateinit var videoCapture: VideoCapture<Recorder>
 
     inner class LocalBinder : Binder() {
         fun getService(): VideoRecordingService = this@VideoRecordingService
@@ -102,13 +106,6 @@ class VideoRecordingService : LifecycleService() {
 
         Thread{this.uploadVideosAfter(Duration.ofMinutes(60))}.start()
 
-        val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
-        val service = this
-        cameraProviderFuture.addListener({
-            val cameraProvider = cameraProviderFuture.get()
-            service.onCameraProvider(cameraProvider)
-        }, ContextCompat.getMainExecutor(this))
-
         return START_STICKY
     }
 
@@ -117,24 +114,30 @@ class VideoRecordingService : LifecycleService() {
         Log.v("TAG", "service onDestroy")
     }
 
-    private fun onCameraProvider(cameraProvider: ProcessCameraProvider){
+    fun onCameraProvider(cameraProvider: ProcessCameraProvider){
         val csBuilder = CameraSelector.Builder()
         csBuilder.requireLensFacing(CameraSelector.LENS_FACING_BACK)
         val cameraSelector = csBuilder.build()
 
         val qualitySelector = QualitySelector.fromOrderedList(
-            listOf(Quality.HD, Quality.SD),
+            listOf(Quality.SD),
             FallbackStrategy.lowerQualityOrHigherThan(Quality.SD))
         val recorder = Recorder.Builder()
             .setQualitySelector(qualitySelector)
             .build()
-        val videoCapture = VideoCapture.Builder(recorder)
+        this.videoCapture = VideoCapture.Builder(recorder)
             .setMirrorMode(MIRROR_MODE_ON_FRONT_ONLY)
             .build()
 
         cameraProvider.bindToLifecycle(this, cameraSelector, videoCapture)
+    }
 
+    fun startRecord() {
         Thread {this.recordVideo(videoCapture)}.start()
+    }
+
+    fun stopRecord() {
+        this.stopRecordingQueue.offer("stop", 200, TimeUnit.MILLISECONDS)
     }
 
     private fun recordVideo(videoCapture: VideoCapture<Recorder>) {
@@ -150,8 +153,13 @@ class VideoRecordingService : LifecycleService() {
         val faraway = Util.timeDate(9999, Util.December, 31, 23, 59, 59, 0, Util.UTC)
         while (Instant.now().isBefore(faraway)) {
             val recording = this.startVideo(videoCapture)
-            Thread.sleep(3*1000L)
+            val videoLen: Long = 3
+            val stopped = this.stopRecordingQueue.poll(videoLen, TimeUnit.SECONDS)
             recording.stop()
+
+            if (stopped != null) {
+                break
+            }
         }
 
         wakeLock.release()
@@ -190,7 +198,7 @@ class VideoRecordingService : LifecycleService() {
             return
         }
 
-        this.videoQueue.offer(fpath)
+        this.videoFinalizedQueue.offer(fpath)
     }
 
     private fun uploadVideosAfter(ago: Duration) {
@@ -200,7 +208,7 @@ class VideoRecordingService : LifecycleService() {
         while (Instant.now().isBefore(faraway)) {
             this.deleteOldVideos(ago)
 
-            val last = this.videoQueue.take()
+            val last = this.videoFinalizedQueue.take()
             val uploadable = this.findUploadableVideos(last)
 
             var tasks = emptyArray<Future<*>>()

@@ -13,15 +13,12 @@ import android.database.sqlite.SQLiteDatabase
 import android.os.Bundle
 import android.os.IBinder
 import android.util.Log
-import android.util.TypedValue
+import android.view.KeyEvent
+import android.view.View
 import android.view.View.GONE
 import android.view.View.VISIBLE
 import android.widget.Button
-import android.widget.EditText
 import android.widget.FrameLayout
-import android.widget.LinearLayout
-import android.widget.ScrollView
-import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
@@ -42,10 +39,11 @@ class MainActivity : AppCompatActivity() {
     private lateinit var preview: Preview
     private lateinit var previewView: PreviewView
 
-    private var cfg = Config()
+    private lateinit var configPage: ConfigPage
+    private lateinit var statusPage: StatusPage
 
     // Bindings to VideoRecordingService.
-    private lateinit var videoRecordingService: VideoRecordingService
+    lateinit var videoRecordingService: VideoRecordingService
     private val videoRecordingServiceConnection = object : ServiceConnection {
         override fun onServiceConnected(className: ComponentName, service: IBinder) {
             val binder = service as VideoRecordingService.LocalBinder
@@ -64,53 +62,21 @@ class MainActivity : AppCompatActivity() {
         this.previewView = PreviewView(this)
 
         val db = DBHelper(this).readableDatabase
-        this.cfg = DBHelper.readConfig(db)
-        if (this.cfg.cameraID == "") {
-            this.cfg.cameraID = "myCamera"
+        val cfg = DBHelper.readConfig(db)
+        if (cfg.cameraID == "") {
+            cfg.cameraID = "myCamera"
         }
-        if (this.cfg.uploadPath == "") {
-            this.cfg.uploadPath = "http://10.0.2.2:8080/UploadVideo"
+        if (cfg.uploadPath == "") {
+            cfg.uploadPath = "http://10.0.2.2:8080/UploadVideo"
         }
 
         this.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
         // Remove stupid bar at the top.
         this.supportActionBar?.hide()
 
-        val scrollView = ScrollView(this)
-        this.setContentView(scrollView)
-        val layout = LinearLayout(this)
-        layout.orientation = LinearLayout.VERTICAL
-        scrollView.addView(layout)
+        this.configPage = ConfigPage.new(this, cfg)
+        this.setContentView(this.configPage.contentView)
 
-        val cameraIDLabel = TextView(this)
-        layout.addView(cameraIDLabel)
-        val clientSize = Util.getClientSize(this)
-        cameraIDLabel.setTextSize(TypedValue.COMPLEX_UNIT_PX, (clientSize.y/ 10).toFloat())
-        cameraIDLabel.text = "Camera name"
-
-        val cameraIDInput = EditText(this)
-        layout.addView(cameraIDInput)
-        cameraIDInput.setTextSize(TypedValue.COMPLEX_UNIT_PX, (clientSize.y/ 32).toFloat())
-        cameraIDInput.setText(cfg.cameraID)
-
-        val serverLabel = TextView(this)
-        layout.addView(serverLabel)
-        serverLabel.setTextSize(TypedValue.COMPLEX_UNIT_PX, (clientSize.y/ 10).toFloat())
-        serverLabel.text = "Server"
-
-        val serverInput = EditText(this)
-        layout.addView(serverInput)
-        serverInput.setTextSize(TypedValue.COMPLEX_UNIT_PX, (clientSize.y/ 32).toFloat())
-        serverInput.setText(cfg.uploadPath)
-
-        val blank = TextView(this)
-        layout.addView(blank)
-        blank.setTextSize(TypedValue.COMPLEX_UNIT_PX, (clientSize.y/ 10).toFloat())
-
-        val okBtn = Button(this)
-        layout.addView(okBtn)
-        okBtn.setTextSize(TypedValue.COMPLEX_UNIT_PX, (clientSize.y/ 10).toFloat())
-        okBtn.text = "OK"
         val activity = this
         val requestPermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { permissions ->
             var isGranted = true
@@ -122,15 +88,29 @@ class MainActivity : AppCompatActivity() {
             }
 
             if (isGranted) {
-                this.onHasPermission(this.cfg)
+                activity.onHasPermission()
             } else {
                 Toast.makeText(activity, "Permission request denied", Toast.LENGTH_LONG).show()
             }
         }
-        okBtn.setOnClickListener { _ ->
-            this.cfg.cameraID = cameraIDInput.text.toString()
-            this.cfg.uploadPath = serverInput.text.toString()
-            activity.askPermission(requestPermissionLauncher, this.cfg)
+        this.configPage.okBtn.setOnClickListener { _ ->
+            cfg.cameraID = this.configPage.cameraIDInput.text.toString()
+            cfg.uploadPath = this.configPage.serverInput.text.toString()
+
+            // Write config.
+            val dbw = DBHelper(this).writableDatabase
+            var values = ContentValues().apply {
+                put(DBHelper.ColConfigKey, DBHelper.ConfigCameraID)
+                put(DBHelper.ColConfigValue, cfg.cameraID)
+            }
+            dbw.insertWithOnConflict(DBHelper.TableConfig, null, values, SQLiteDatabase.CONFLICT_REPLACE)
+            values = ContentValues().apply {
+                put(DBHelper.ColConfigKey, DBHelper.ConfigUploadPath)
+                put(DBHelper.ColConfigValue, cfg.uploadPath)
+            }
+            dbw.insertWithOnConflict(DBHelper.TableConfig, null, values, SQLiteDatabase.CONFLICT_REPLACE)
+
+            activity.askPermission(requestPermissionLauncher)
         }
     }
 
@@ -146,28 +126,15 @@ class MainActivity : AppCompatActivity() {
         this.preview.setSurfaceProvider(null)
     }
 
-    private fun askPermission(requestPermissionLauncher: ActivityResultLauncher<Array<String>>, cfg: Config) {
+    private fun askPermission(requestPermissionLauncher: ActivityResultLauncher<Array<String>>) {
         if (this.hasPermissions()) {
-            this.onHasPermission(cfg)
+            this.onHasPermission()
             return
         }
         requestPermissionLauncher.launch(this.permissions)
     }
     @SuppressLint("SetTextI18n", "ClickableViewAccessibility")
-    fun onHasPermission(cfg: Config) {
-        // Write config.
-        val db = DBHelper(this).writableDatabase
-        var values = ContentValues().apply {
-            put(DBHelper.ColConfigKey, DBHelper.ConfigCameraID)
-            put(DBHelper.ColConfigValue, cfg.cameraID)
-        }
-        db.insertWithOnConflict(DBHelper.TableConfig, null, values, SQLiteDatabase.CONFLICT_REPLACE)
-        values = ContentValues().apply {
-            put(DBHelper.ColConfigKey, DBHelper.ConfigUploadPath)
-            put(DBHelper.ColConfigValue, cfg.uploadPath)
-        }
-        db.insertWithOnConflict(DBHelper.TableConfig, null, values, SQLiteDatabase.CONFLICT_REPLACE)
-
+    fun onHasPermission() {
         val layout = FrameLayout(this)
         this.setContentView(layout)
 
@@ -178,18 +145,18 @@ class MainActivity : AppCompatActivity() {
         this.previewView.layoutParams = params
         layout.addView(this.previewView)
 
-        val statusPage = StatusPage.new(this)
+        this.statusPage = StatusPage.new(this)
         params = FrameLayout.LayoutParams(clientSize.x, clientSize.y/2)
         params.leftMargin = 0
         params.topMargin = 0
-        statusPage.contentView.layoutParams = params
-        statusPage.contentView.visibility = GONE
+        this.statusPage.contentView.layoutParams = params
+        this.statusPage.contentView.visibility = GONE
         val activity = this
-        statusPage.zll.setOnTouchListener { _, _ ->
-            statusPage.zll.init(this@MainActivity)
+        this.statusPage.zll.setOnTouchListener { _, _ ->
+            this.statusPage.zll.init(this@MainActivity)
             false
         }
-        layout.addView(statusPage.contentView)
+        layout.addView(this.statusPage.contentView)
 
         val btn = Button(this)
         val btnWidth = clientSize.x/4
@@ -198,7 +165,7 @@ class MainActivity : AppCompatActivity() {
         params.topMargin = 0
         btn.layoutParams = params
         btn.text = "show/hide"
-        btn.setOnClickListener { _ -> activity.showHideClick(statusPage) }
+        btn.setOnClickListener { _ -> activity.showHideClick(this.statusPage) }
         layout.addView(btn)
 
         this.startForegroundService(Intent(this, VideoRecordingService::class.java))
@@ -214,8 +181,23 @@ class MainActivity : AppCompatActivity() {
         val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
         val activity = this
         cameraProviderFuture.addListener({
-            cameraProviderFuture.get().bindToLifecycle(activity.videoRecordingService, cameraSelector, activity.preview)
+            val camProvider =  cameraProviderFuture.get()
+            camProvider.bindToLifecycle(
+                activity.videoRecordingService, cameraSelector, activity.preview)
+            this.videoRecordingService.onCameraProvider(camProvider)
+            this.videoRecordingService.startRecord()
         }, ContextCompat.getMainExecutor(this))
+
+        this.statusPage.cmdInput.setOnKeyListener(View.OnKeyListener { _, keyCode, event ->
+            val cmd = this.statusPage.cmdInput.text.toString()
+            if (keyCode == KeyEvent.KEYCODE_ENTER && event.action == KeyEvent.ACTION_UP) {
+                if (cmd == "stop") {
+                    this.videoRecordingService.stopRecord()
+                }
+                return@OnKeyListener true
+            }
+            false
+        })
     }
 
     private fun showHideClick(statusPage: StatusPage) {
@@ -225,7 +207,7 @@ class MainActivity : AppCompatActivity() {
         var uploadErrs = emptyArray<UploadError>()
         uploadErrs = this.videoRecordingService.uploadErrs.all(uploadErrs)
 
-        statusPage.update(this.cfg, numVideos, uploadErrs)
+        statusPage.update(this.videoRecordingService.cfg, numVideos, uploadErrs)
         if (statusPage.contentView.visibility == VISIBLE) {
             statusPage.contentView.visibility = GONE
         } else {

@@ -2,8 +2,11 @@ package com.topunion.camera
 
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.util.Log
 import android.util.TypedValue
+import android.view.KeyEvent
 import android.view.View
+import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -13,6 +16,7 @@ class StatusPage {
     lateinit var zll: ZoomLinearLayout
     lateinit var ll: LinearLayout
 
+    lateinit var cmdInput: EditText
     private lateinit var cameraIDInput: TextView
     private lateinit var serverInput: TextView
     private lateinit var videosPendingInput: TextView
@@ -20,7 +24,7 @@ class StatusPage {
 
     companion object {
         @SuppressLint("SetTextI18n")
-        fun new(activity: Activity): StatusPage {
+        fun new(activity: MainActivity): StatusPage {
             val sp = StatusPage()
             sp.contentView = ScrollView(activity)
 
@@ -31,9 +35,13 @@ class StatusPage {
             sp.ll.orientation = LinearLayout.VERTICAL
             sp.zll.addView(sp.ll)
 
+            sp.cmdInput = EditText(activity)
+            sp.ll.addView(sp.cmdInput)
+            val clientSize = Util.getClientSize(activity)
+            sp.cmdInput.setTextSize(TypedValue.COMPLEX_UNIT_PX, (clientSize.y/ 32).toFloat())
+
             val cameraIDLabel = TextView(activity)
             sp.ll.addView(cameraIDLabel)
-            val clientSize = Util.getClientSize(activity)
             cameraIDLabel.setTextSize(TypedValue.COMPLEX_UNIT_PX, (clientSize.y/ 10).toFloat())
             cameraIDLabel.text = "Camera name"
 
