@@ -9,7 +9,7 @@ android {
 
     defaultConfig {
         applicationId = "com.topunion.camera"
-        minSdk = 26
+        minSdk = 23
         targetSdk = 34
         versionCode = 1
         versionName = "1.0"
@@ -27,6 +27,11 @@ android {
         }
     }
     compileOptions {
+        // Flag to enable support for the new language APIs
+        // This is needed for basic stuff like java.time.ZoneId on sdk version < 26.
+        // For AGP 4.1+
+        isCoreLibraryDesugaringEnabled = true
+
         sourceCompatibility = JavaVersion.VERSION_1_8
         targetCompatibility = JavaVersion.VERSION_1_8
     }
@@ -36,6 +41,10 @@ android {
 }
 
 dependencies {
+    // Desugaring to enable support for the new language APIs.
+    // This is needed for basic stuff like java.time.ZoneId on sdk version < 26.
+    // For AGP 7.4+
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
 
     implementation("androidx.core:core-ktx:1.12.0")
     implementation("androidx.appcompat:appcompat:1.6.1")

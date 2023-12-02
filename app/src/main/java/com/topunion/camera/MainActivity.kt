@@ -10,6 +10,7 @@ import android.content.ServiceConnection
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.database.sqlite.SQLiteDatabase
+import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
 import android.util.Log
@@ -122,7 +123,7 @@ class MainActivity : AppCompatActivity() {
 
         // It is very IMPORTANT that we set the surface to null,
         // or else stupid Android stops our video recording!
-        // This is probably because when our activit is stopped, this.preview is also stopped,
+        // This is probably because when our activity is stopped, this.preview is also stopped,
         // which affects our videoCapture in the background.
         this.preview.setSurfaceProvider(null)
     }
@@ -169,8 +170,12 @@ class MainActivity : AppCompatActivity() {
         btn.setOnClickListener { _ -> activity.showHideClick(this.statusPage) }
         layout.addView(btn)
 
-        this.startForegroundService(Intent(this, VideoRecordingService::class.java))
         val intent = Intent(this, VideoRecordingService::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            this.startForegroundService(intent)
+        } else {
+            this.startService(intent)
+        }
         this.bindService(intent, this.videoRecordingServiceConnection, Context.BIND_AUTO_CREATE)
     }
 

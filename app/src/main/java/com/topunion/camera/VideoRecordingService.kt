@@ -163,7 +163,7 @@ class VideoRecordingService : LifecycleService() {
         val faraway = Util.timeDate(9999, Util.December, 31, 23, 59, 59, 0, Util.UTC)
         while (Instant.now().isBefore(faraway)) {
             val recording = this.startVideo(videoCapture)
-            val videoLen: Long = 3
+            val videoLen: Long = 10
             val stopped = this.stopRecordingQueue.poll(videoLen, TimeUnit.SECONDS)
             recording.stop()
 
@@ -296,12 +296,16 @@ class VideoRecordingService : LifecycleService() {
 
     @Suppress("SameParameterValue")
     private fun createNotificationChannel(channelId: String, channelName: String): String{
-        val chan = NotificationChannel(channelId,
-            channelName, NotificationManager.IMPORTANCE_NONE)
-        chan.lightColor = Color.BLUE
-        chan.lockscreenVisibility = Notification.VISIBILITY_PRIVATE
-        val service = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        service.createNotificationChannel(chan)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val chan = NotificationChannel(channelId,
+                channelName, NotificationManager.IMPORTANCE_NONE)
+            chan.lightColor = Color.BLUE
+            chan.lockscreenVisibility = Notification.VISIBILITY_PRIVATE
+            val service = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            service.createNotificationChannel(chan)
+        } else {
+            // VERSION.SDK_INT < O
+        }
         return channelId
     }
 
