@@ -15,6 +15,7 @@ import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
 import android.util.Log
+import android.view.Surface
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.MirrorMode.MIRROR_MODE_ON_FRONT_ONLY
 import androidx.camera.lifecycle.ProcessCameraProvider
@@ -106,7 +107,7 @@ class VideoRecordingService : LifecycleService() {
         this.videoDir = File(this.getExternalFilesDir(null), "video").toString()
         File(this.videoDir).mkdirs()
 
-        Thread{this.uploadVideosAfter(Duration.ofMinutes(60))}.start()
+        Thread{this.uploadVideosAfter(Duration.ofMinutes(2))}.start()
 
         val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
         cameraProviderFuture.addListener({
@@ -134,6 +135,7 @@ class VideoRecordingService : LifecycleService() {
             .setQualitySelector(qualitySelector)
             .build()
         this.videoCapture = VideoCapture.Builder(recorder)
+            .setTargetRotation(Surface.ROTATION_90)
             .setMirrorMode(MIRROR_MODE_ON_FRONT_ONLY)
             .build()
 

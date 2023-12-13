@@ -1,6 +1,7 @@
 package com.topunion.camera
 
 import android.annotation.SuppressLint
+import android.graphics.Color.WHITE
 import android.util.TypedValue
 import android.view.View
 import android.view.inputmethod.EditorInfo
@@ -25,6 +26,7 @@ class StatusPage {
         fun new(activity: MainActivity): StatusPage {
             val sp = StatusPage()
             sp.contentView = ScrollView(activity)
+            sp.contentView.setBackgroundColor(WHITE)
 
             sp.zll = ZoomLinearLayout(activity)
             sp.contentView.addView(sp.zll)
