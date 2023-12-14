@@ -67,7 +67,9 @@ class MainActivity : AppCompatActivity() {
             cfg.cameraID = "camera0"
         }
         if (cfg.uploadPath == "") {
+            // https://developer.android.com/studio/run/emulator-networking
             cfg.uploadPath = "http://10.0.2.2:8080/UploadVideo"
+            cfg.uploadPath = "http://192.168.0.2:8080/UploadVideo"
         }
 
         this.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
