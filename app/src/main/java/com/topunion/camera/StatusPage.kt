@@ -9,6 +9,7 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import androidx.core.content.ContextCompat
 
 class StatusPage {
     lateinit var contentView: ScrollView
@@ -24,9 +25,14 @@ class StatusPage {
     companion object {
         @SuppressLint("SetTextI18n")
         fun new(activity: MainActivity): StatusPage {
+            // Use the dark mode theme.
+            val typedValue = TypedValue();
+            activity.theme.resolveAttribute(android.R.attr.colorBackground, typedValue, true);
+            val colorBackground = ContextCompat.getColor(activity, typedValue.resourceId)
+
             val sp = StatusPage()
             sp.contentView = ScrollView(activity)
-            sp.contentView.setBackgroundColor(WHITE)
+            sp.contentView.setBackgroundColor(colorBackground)
 
             sp.zll = ZoomLinearLayout(activity)
             sp.contentView.addView(sp.zll)
